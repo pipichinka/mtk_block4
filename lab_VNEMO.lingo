@@ -1,0 +1,81 @@
+program = ws vardecllist:v ws  annotatedBody:b ws {AnnotatedNemoProgram(:v, :b)};
+
+vardecllist = vardecl*:ds {buildVarDecls(:ds)} ;
+vardecl = ws 'VAR' s+ varname:e ws ':' ws type:t ws ';' {VarDecl(:e, :t)};
+type = INT | ARRAY;
+ARRAY = '[' ws type:t ws ']' {Array(:t)};
+INT = 'INT' {Int()};
+
+
+
+annotatedBody = preCond:pre ws "{" ws body:b ws "}" ws postCond:post {AnnotatedBody(:b, :pre, :post)};
+body = statement;
+
+statement = (ws choice:a ws ';' ws {:a})*:as {buildBodiesSeq(:as)};
+
+choice = operation:t udOperation*:es ws {buildUDChoice(:t, :es)};
+udOperation = ws 'U' ws operation:s {:s};
+operation = simpleoperation:t {:t} | '{' ws statement:s ws '}' {:s};
+simpleoperation = print | assignment | test | annotatedIteration;
+print = 'PRINT' ws '(' ws expr:e ws ')' {Print(:e)}; 
+assignment = varname:n ws ':=' ws expr:e {Assignment(:n, :e)};
+test = '(' ws boolexpr:b ws ')' ws '?' {Test(:b)};
+annotatedIteration = iterationInv:inv ws iteration:it {AnnotatedUDIteration(:it, :inv)};
+iteration = '{' body:b '}' ws '*' {:b}; 
+
+
+preCond = "{" ws boolexpr:e  ws '}' {:e};
+postCond = "{" ws boolexpr:e  ws '}' {:e};
+iterationInv = ws '{' ws boolexpr:e ws '}' {:e};
+
+expr = arrayop | arithmexpr | const | varexpr;
+
+
+arrayop = arrayAPP | arrayUPD;
+arrayAPP = 'APP' ws '(' ws expr:a ws ',' ws expr:i ws ')' {ArrayOp(:a, ArrayApplyOpType(:i))} ;
+arrayUPD = 'UPD' ws '(' ws expr:a ws ',' ws expr:i ws ',' ws expr:v ws ')' {ArrayOp(:a, ArrayUpdateOpType(:i, :v))};
+
+const = intconst | arrayconst;
+arrayconst = '[' ws ']' | '[' ws constlist*:cs const?:c ws ','? ws ']' {buildArrayConst(:cs, :c)};
+constlist = const:c ws ',' ws {:c};
+
+arithmexpr = ws lev1:e ws {:e};
+lev1 = ws lev2:e1  sub*:es ws '+' ws lev1:e2 {ArithmBinary(buildArithmSub(:e1, :es),:e2, ArithmAddOp())} | lev2:e1 sub*:es {buildArithmSub(:e1, :es)};
+sub = ws '-' ws lev2:t { :t };
+lev2 = ws factor:e1  div*:es ws '*' ws lev2:e2 {ArithmBinary(buildArithmDiv(:e1, :es),:e2, ArithmMulOp())} | factor:e1 div*:es {buildArithmDiv(:e1, :es)};
+div = ws '/' ws factor:t { :t };
+factor = '+'? ws intconst:e {:e} | '-' ws intconst:e {ArithmNeg(:e)} |
+         '+'? ws varexpr:e {:e} | '-' ws varexpr:e {ArithmNeg(:e)} |
+         '+'? ws arrayop:e {:e} | '-' ws arrayop:e {ArithmNeg(:e)} | 
+         '+'? ws '(' ws expr:e ws ')' {:e} | ws'-(' ws expr:e ws ')' {ArithmNeg(:e)};
+
+
+boolexpr = ws orop:o ws {:o};
+orop = andop:a ws 'or' ws orop:o {Or(:a, :o)}
+    | andop:a {:a};
+andop = boolterm:t ws 'and' ws andop:a {buildAnd(:t, :a)}
+    | boolterm:t {:t};
+boolterm = simpleterm:t {:t}
+    | '(' ws boolterm:t ws ')' {:t};
+simpleterm = boolvar:t1 ws '=' ws boolvar:t2 {buildEqual(:t1, :t2)}
+    | boolvar:t1 ws '<' ws boolvar:t2 {buildLess(:t1, :t2)}
+    | boolvar:t1 ws "<=" ws boolvar:t2 {buildLessOrEqual(:t1, :t2)}
+    | boolvar:t1 ws ">" ws boolvar:t2 {buildGreater(:t1, :t2)}
+    | boolvar:t1 ws ">=" ws boolvar:t2 {buildGreaterOrEqual(:t1, :t2)}
+    | boolvar:t1 ws "!=" ws boolvar:t2 {buildNotEqual(:t1, :t2)}
+    | 'NOT' ws boolexpr:e {Not(:e)}
+    | '(' ws boolexpr:e ws ')' {:e}
+    | boolConst:c {:c};
+boolvar = expr;
+
+boolConst = 'false' {buildFaslseConst()} | 'true' {buildTrueConst()};
+
+
+ws = s*;
+s = ' ' | '\n' | '\t';
+
+varexpr = varname:n {Var(:n)};
+varname = (letter (letter | digit)*)$n {:n};
+letter = 'a' - 'z' | 'A' - 'Z';
+intconst = digit+ $d {IntConst(s2i($d))};
+digit = '0' - '9';

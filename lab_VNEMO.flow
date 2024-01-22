@@ -1,0 +1,951 @@
+import runtime;
+import lingo/pegcode/driver;
+import string;
+import math/math;
+import ds/tree;
+
+
+Int();
+Array(type: Type);
+AnyType();
+NoType();
+Bool();
+Type ::= Int, Array, AnyType, NoType, Bool;
+
+VarDecl(var: string, type: Type);
+VarDeclList(vars: [VarDecl]);
+
+Const ::= IntConst, ArrayConst;
+IntConst(v: int);
+ArrayConst(arr: Tree<int, Const>);
+
+BoolConst(val: bool);
+
+Var(name : string);
+
+ArithmAddOp();
+ArithmSubOp();
+ArithmMulOp();
+ArithmDivOp();
+ArithmBinaryOp ::= ArithmAddOp, ArithmSubOp, ArithmMulOp, ArithmDivOp;
+    
+ArithmBinary(l : Expr, r : Expr, op : ArithmBinaryOp);
+ArithmNeg(e : Expr);
+ArithmExpr ::= ArithmBinary, ArithmNeg;
+
+Equal();
+Less();
+ComparisonType ::= Equal, Less;
+Comparison(l : Expr, r : Expr, comparisonType : ComparisonType);
+
+Not(e : BooleanExpr);
+Or(l : BooleanExpr, r : BooleanExpr);
+    
+BooleanExpr ::= Comparison, Not, Or, BoolConst;
+    
+
+ArrayUpdateOpType(ind : Expr, val : Expr);
+ArrayApplyOpType(ind : Expr);
+ArrayOpType ::= ArrayUpdateOpType, ArrayApplyOpType;
+ArrayOp(arr : Expr, opType : ArrayOpType);
+
+Expr ::= Var, Const, ArithmExpr, ArrayOp;
+
+Assignment(varName : string, expr : Expr);
+BodiesSeq(bodies : [Body]);
+Test(be : BooleanExpr);
+Print(e : Expr);
+UDChoice(bodies : [Body]);
+AnnotatedUDIteration(body : Body, invariant : BooleanExpr);
+Body ::= Assignment, BodiesSeq, Test, UDChoice, AnnotatedUDIteration, Print;
+
+AnnotatedBody(body : Body, preCond : BooleanExpr, postCond : BooleanExpr);
+
+AnnotatedNemoProgram : (varDeclList : VarDeclList, body : AnnotatedBody);
+
+
+
+Sucsess();
+Error(mes: string);
+CheckResult ::= Sucsess, Error;
+
+
+buildVarDecls(a : [flow]) {
+    VarDeclList(a[0]);
+}
+
+buildTrueConst(a : [flow]) {
+    BoolConst(true);
+}
+
+buildFalseConst(a : [flow]) {
+    BoolConst(false);
+}
+
+buildArrayConst(a : [flow]) {
+    if (length(a) == 0) {
+        ArrayConst(makeTree());
+    } else {
+        values = concat(a[0], a[1]);
+        treeOfValues = foldi(values, makeTree(), \i, acc, v -> setTree(acc, i, v));
+        ArrayConst(treeOfValues);
+    }
+}
+
+buildArithmSub(a : [flow]) {
+    fold(a[1], a[0], \acc, e -> ArithmBinary(acc, e, ArithmSubOp()))
+}
+
+buildArithmDiv(a : [flow]) {
+    fold(a[1], a[0], \acc, e -> ArithmBinary(acc, e, ArithmDivOp()))
+}
+
+buildLess_(e1 : Expr, e2 : Expr) {
+    Comparison(e1, e2, Less());
+}
+
+buildEqual_(e1 : Expr, e2 : Expr) {
+    Comparison(e1, e2, Equal());
+}
+
+buildLess(a : [flow]) {
+    buildLess_(a[0], a[1]);
+}
+
+buildEqual(a : [flow]) {
+    buildEqual_(a[0], a[1]);
+}
+
+buildLessOrEqual(a : [flow]) {
+    t1 = a[0];
+    t2 = a[1];
+    Or(buildEqual_(t1, t2), buildLess_(t1, t2));
+}
+
+buildGreater(a : [flow]) {
+    buildLess_(a[1], a[0]);
+}
+
+buildGreaterOrEqual(a : [flow]) {
+    t1 = a[0];
+    t2 = a[1];
+    Or(buildEqual_(t1, t2), buildLess_(t2, t1));
+}
+
+buildNotEqual(a : [flow]) {
+    Not(buildEqual_(a[0], a[1]));
+}
+
+buildAnd(a : [flow]) {
+    Not(Or(Not(a[0]), Not(a[1])));
+}
+
+buildBodiesSeq(a : [flow]) {
+    BodiesSeq(a[0]);
+}
+
+buildUDChoice(a : [flow]) {
+    UDChoice(concat([a[0]], a[1]));
+}
+
+
+specialPegActions = {
+    actions : [Pair<string, ([flow]) -> flow>] = [
+        Pair("buildVarDecls", buildVarDecls),
+        Pair("buildTrueConst", buildTrueConst),
+        Pair("buildFalseConst", buildFalseConst),
+        Pair("buildArrayConst", buildArrayConst),
+        Pair("buildArithmSub", buildArithmSub),
+        Pair("buildArithmDiv", buildArithmDiv),
+        Pair("buildLess", buildLess),
+        Pair("buildEqual", buildEqual),
+        Pair("buildLessOrEqual", buildLessOrEqual),
+        Pair("buildGreater", buildGreater),
+        Pair("buildGreaterOrEqual", buildGreaterOrEqual),
+        Pair("buildNotEqual", buildNotEqual),
+        Pair("buildAnd", buildAnd),
+        Pair("buildBodiesSeq", buildBodiesSeq),
+        Pair("buildUDChoice", buildUDChoice),
+    ];
+
+    SemanticActions(fold(
+        actions, defaultPegActions.t, \acc, p -> {
+            setTree(acc, p.first, p.second);
+        }
+    ));
+}
+
+parse(programString: string) -> flow {
+    grammar = compilePegGrammar("#include ./sandbox/lab_VNEMO.lingo");
+    parsic(grammar, programString, specialPegActions);
+}
+
+
+checkVarDeclList(decllist: VarDeclList) -> CheckResult {
+    foldi(decllist.vars, Sucsess(), \i,err, vardec1 -> {
+        fold(subrange(decllist.vars, i + 1, length(decllist.vars) - i - 1), err, \err2, vardec2 -> {
+            switch (err2 : CheckResult) {
+                Error(mes): Error(mes)
+                Sucsess(): if (vardec1.var == vardec2.var) Error(concatStrings(["redefinition of var: ", vardec1.var])) else Sucsess(); 
+            }
+    })
+    })
+}
+
+
+checkVarPresence(var: string, vars: VarDeclList) -> CheckResult{
+    fold(vars.vars, Error(concatStrings(["no var named ", var])), \err, vardec -> {
+        switch (err : CheckResult) {
+            Error(mes): if (var == vardec.var) Sucsess() else err
+            Sucsess(): err; 
+        }
+    })
+}
+
+
+computeBestType(a: Type, b:Type ) -> Type {
+    switch (a : Type) {
+        Int(): {
+            switch (b : Type) {
+                Int(): Int()
+                AnyType(): Int()
+                default: NoType()
+            }
+        }
+
+        AnyType(): b
+
+        NoType(): a
+
+        Array(t): {
+            switch (b : Type) {
+                Int(): NoType()
+                NoType(): b
+                AnyType(): a
+                Array(t1): {
+                    resT = computeBestType(t, t1);
+                    switch (resT : Type) {
+                        Bool(): NoType()
+                        NoType(): NoType()
+                        default: Array(resT)  
+                    }
+                }
+                Bool(): NoType()
+            }
+        }
+
+        Bool(): {
+            switch (b : Type) {
+                Bool(): Bool()
+                AnyType(): Bool()
+                default: NoType()
+            }
+        }
+    }    
+}
+
+
+computeConstArrayTypes(arr: ArrayConst) -> [Type]{
+    types = foldTree(arr.arr, [], \key, val, acc ->{
+        switch (val : Const) {
+            IntConst(v): arrayPush(acc, Int())
+
+            ArrayConst(a): {
+                res = computeConstArrayTypes(val);
+                arrayPush(acc, Array(fold(res, res[0], computeBestType)))
+            }
+        }
+    });
+    if (types == []) [Array(AnyType())]
+    else types
+}
+
+
+computeConstArrayType(arr: ArrayConst) -> Type {
+    arrayTypes = computeConstArrayTypes(arr);
+    Array(fold(arrayTypes, arrayTypes[0], computeBestType));
+}
+
+
+checkArrayConst(arr : ArrayConst) -> CheckResult{
+    type = computeConstArrayType(arr);
+    switch (type : Type) {
+        NoType(): Error("invalid const Array type")
+        default: Sucsess()
+    }
+}
+
+
+checkConst(c: Const) -> CheckResult{
+    switch (c : Const) {
+        IntConst(v): Sucsess()
+        ArrayConst(arr): checkArrayConst(c)
+    }
+}
+
+
+getVarType(v: string, vars: VarDeclList) -> Type{
+    fold(vars.vars, NoType(), \acc, vardecl -> {
+        if (vardecl.var == v) vardecl.type
+        else acc
+    })
+}
+
+
+getConstType(c: Const) -> Type {
+    switch (c : Const) {
+        IntConst(v): Int()
+        ArrayConst(arr): computeConstArrayType(c)
+    }
+}
+
+
+getOpType(arrType: Type, opType: ArrayOpType, vars: VarDeclList) -> Type{
+    switch (opType : ArrayOpType) {
+        ArrayApplyOpType(i): {
+            iType = exprType(i, vars);
+            switch (iType : Type) {
+                Int(): switch (arrType : Type) {
+                    AnyType(): NoType()
+                    default: arrType
+                }
+                default: NoType()
+            }
+        }
+
+        ArrayUpdateOpType(i, v): {
+            iType = exprType(i, vars);
+            vType = exprType(v, vars);
+            t = computeBestType(arrType, vType);
+            switch (iType : Type) {
+                Int(): switch (t : Type) {
+                    AnyType(): NoType()
+                    NoType(): NoType()
+                    Bool(): NoType()
+                    default: Array(arrType)
+                }
+                default: NoType()
+            }
+
+        }
+    }
+}
+
+
+getArrayOpType(arrayop: ArrayOp, vars: VarDeclList) -> Type {
+    arrType = exprType(arrayop.arr, vars);
+    switch (arrType : Type) {
+        Array(t): getOpType(t, arrayop.opType, vars)
+        default: NoType()
+    }
+}
+
+
+getBooleanExprType(boolExpr: BooleanExpr, vars: VarDeclList) -> Type {
+    switch (boolExpr : BooleanExpr) {
+        BoolConst(v): Bool()
+
+        Not(e) : getBooleanExprType(e, vars)
+        
+        Or(l, r) : {
+            lType = getBooleanExprType(l, vars);
+            rType = getBooleanExprType(r, vars);
+            switch (lType : Type) {
+                Bool(): switch (rType : Type) {
+                            Bool(): Bool()
+                            default: NoType()
+                }
+
+                default: NoType()
+            }
+        }
+
+
+        Comparison(l, r, t): {
+            lType = exprType(l, vars);
+            rType = exprType(r, vars);
+            switch(lType: Type){
+                Int(): switch (rType : Type) {
+                        Int(): Bool()
+                        default: NoType()
+                }
+                default: NoType()
+            }
+        }
+    }
+}
+
+
+exprType(e: Expr, vars: VarDeclList) -> Type {
+    switch (e : Expr) {
+        Var(v): getVarType(v, vars)
+
+        Const(c): getConstType(e)
+
+        ArithmExpr(ex): arithmExprType(e, vars)
+
+        ArrayOp(a, t): getArrayOpType(e, vars)  
+    }
+}
+
+
+arithmExprType(e: ArithmExpr, vars: VarDeclList) -> Type{
+    switch (e : ArithmExpr) {
+        ArithmNeg(ex): {
+            res = exprType(e, vars);
+            switch (res : Type) {
+                Int(): Int()
+                default: NoType()
+            }
+        }
+        ArithmBinary(l, r, op): {
+            res1 = exprType(l, vars);
+            res2 = exprType(r, vars);
+            switch (res1 : Type) {
+                Int(): switch (res2 : Type) {
+                        Int(): Int()
+                        default: NoType()
+                    }
+                default: NoType()
+            }
+        }
+    }
+}
+
+
+checkArithmExpr(e: ArithmExpr, vars: VarDeclList) -> CheckResult {
+    eType = arithmExprType(e, vars);
+    switch (eType : Type) {
+        Int(): Sucsess()
+        default: Error("invalid arpihmetic expr type")
+    }
+}
+
+
+checkArrayOp(arrayOp: ArrayOp, vars: VarDeclList) -> CheckResult {
+    type = getArrayOpType(arrayOp, vars);
+    switch (type : Type) {
+        NoType(): Error("invalid type in array operation")
+        default: Sucsess()
+    }
+}
+
+
+checkBooleanExpr(boolExpr: BooleanExpr, vars : VarDeclList) -> CheckResult {
+    type = getBooleanExprType(boolExpr, vars);
+    switch (type : Type) {
+        Bool(): Sucsess()
+        default: Error("invalid type in boolead expresion")
+    }
+}
+
+
+checkPrint(e: Expr, vars: VarDeclList) -> CheckResult{
+    switch (e : Expr) {
+        Var(v): checkVarPresence(v, vars)
+        Const(c): checkConst(e)
+        ArithmExpr(ex): checkArithmExpr(e, vars)
+        ArrayOp(a, t): checkArrayOp(e, vars)      
+    }
+}
+
+
+checkAssignment(v: string, expr: Expr, vars: VarDeclList) -> CheckResult {
+    varCheckRes = checkVarPresence(v, vars);
+    eType = exprType(expr, vars);
+    t = computeBestType(eType, getVarType(v, vars)); 
+    switch (varCheckRes : CheckResult) {
+        Sucsess(): switch (t : Type) {
+            NoType(): Error("invalid types in assignment");
+            default: Sucsess()
+        }
+        Error(m): varCheckRes
+    }
+}
+
+
+checkTest(boolExpr: BooleanExpr, vars : VarDeclList) -> CheckResult {
+    type = getBooleanExprType(boolExpr, vars);
+    switch (type : Type) {
+        Bool(): Sucsess()
+        default: Error("invalid boolexpr in check operation")
+    }
+}
+
+
+checkBody(body: Body, vars: VarDeclList) -> CheckResult{
+    switch (body : Body) {
+        Print(e): checkPrint(e, vars)
+
+        Assignment(v, e): checkAssignment(v, e, vars)
+
+        BodiesSeq(bs): fold(bs, Sucsess(), \acc, b ->{
+            res = checkBody(b, vars);
+            switch (acc : CheckResult) {
+                Sucsess(): res
+                default: acc
+            }
+        })
+
+        Test(ex): checkTest(ex, vars)
+
+        UDChoice(bs): fold(bs, Sucsess(), \acc, b ->{
+            res = checkBody(b, vars);
+            switch (acc : CheckResult) {
+                Sucsess(): res
+                default: acc
+            }
+        })
+
+        AnnotatedUDIteration(b, inv): checkBody(b, vars)
+    }
+}
+
+
+ExprRes ::= Const, BoolConst, Error;
+
+
+doRange(len : int, acc : [int], index : int) -> [int] {
+    if (index == len) {
+        acc;
+    } else {
+        doRange(len, arrayPush(acc, index), index + 1);
+    }
+}
+
+range(maxIndex : int) -> [int] {
+    doRange(maxIndex + 1, [], 0);
+}
+
+
+constTree2s(t : Tree<int, Const>) -> string {
+    switch (popmax(t)) {
+        EmptyPopResult() : "[]";
+        
+        PopResult(resK, resV, rest) : {
+            maxIndex = resK;
+            r = range(maxIndex);
+            l = foldi(
+                range(maxIndex), "", \i, acc, e -> {
+                    curConst = lookupTree(t, e);
+                    curConstRepr = eitherMap(curConst, const2s, "__");
+                    
+                    tmp = acc + curConstRepr;
+
+                    if (i == maxIndex) {
+                        tmp;
+                    } else {
+                        tmp + ", ";
+                    }
+                }
+            );
+
+            "[" + l + "]";
+        }
+    };
+}
+
+
+constArrayInitZ3(arr: ArrayConst) -> string {
+    constArrayInitZ3_(computeConstArrayType(arr))
+}
+
+
+constArrayInitZ3_(arr: Type) -> string {
+    switch (arr : Type) {
+        Array(t): switch (t : Type) {
+            Int(): "((as const (Array Int Int)) 0)"
+            Array(t2): "((as const (Array Int " + type2Z3type(t) + ")) " + constArrayInitZ3_(t) + ")"
+            default: ""
+        }
+        default: ""
+    }
+}
+
+
+constArray2Z3(t: ArrayConst) -> string {
+    switch (popmax(t.arr)) {
+        EmptyPopResult() : constArrayInitZ3(t)
+        
+        PopResult(resK, resV, rest) : {
+            maxIndex = resK;
+            r = range(maxIndex);
+            fold(
+                range(maxIndex), constArrayInitZ3(t), \acc, e -> {
+                    curConst = lookupTree(t.arr, e);
+                    curConstRepr = eitherMap(curConst, Expr2Z3, "__");
+
+                    "(store " + acc + " " + i2s(e) + " " + curConstRepr + ")"
+                }
+            )
+        }
+    };
+}
+
+
+const2s(c: ExprRes) -> string{
+    switch (c : ExprRes) {
+        Error(s): s
+        IntConst(value) : i2s(value);
+        ArrayConst(values) : constTree2s(values);
+        BoolConst(v): b2s(v)
+    }
+}
+
+buildLogicAnd(c1 : BooleanExpr, c2 : BooleanExpr) -> BooleanExpr {
+    Not(Or(Not(c1), Not(c2)));
+}
+
+buildLogicImplication(c1 : BooleanExpr, c2 : BooleanExpr) -> BooleanExpr {
+    Or(Not(c1), c2);
+}
+
+condsArrayToCond(conds : [BooleanExpr]) -> BooleanExpr {
+    if (length(conds) == 0) {
+        BoolConst(true);
+    } else {
+        fold(tail(conds), conds[0], \acc, c -> buildLogicAnd(acc, c));
+    }
+}
+
+condsSetToCond(conds : Set<BooleanExpr>) -> BooleanExpr {
+    condsArrayToCond(set2array(conds));
+}
+
+replaceVarInArithmExpr(expr : ArithmExpr, varName : string, destination : Expr) -> ArithmExpr {
+    switch (expr) {
+        ArithmBinary(l, r, op) : ArithmBinary(
+            replaceVarInExpr(l, varName, destination),
+            replaceVarInExpr(r, varName, destination),
+            op
+        );
+
+        ArithmNeg(e) : ArithmNeg(replaceVarInExpr(e, varName, destination));
+    }
+}
+
+replaceVarInBooleanExpr(expr : BooleanExpr, varName : string, destination : Expr) -> BooleanExpr {
+    switch (expr) {
+        Comparison(l, r, cmpType) : Comparison(
+            replaceVarInExpr(l, varName, destination),
+            replaceVarInExpr(r, varName, destination),
+            cmpType
+        );
+
+        Not(e) : Not(replaceVarInBooleanExpr(e, varName, destination));
+
+        Or(l, r) : Or(
+            replaceVarInBooleanExpr(l, varName, destination),
+            replaceVarInBooleanExpr(r, varName, destination)
+        );
+
+        BoolConst(value) : expr;
+    }
+}
+
+replaceVarsInArrayOp(expr : ArrayOp, varName : string, destination : Expr) -> ArrayOp {
+    newArrayOpType = switch (expr.opType) {
+        ArrayUpdateOpType(ind, val) : ArrayUpdateOpType(
+            replaceVarInExpr(ind, varName, destination),
+            replaceVarInExpr(val, varName, destination)
+        );
+
+        ArrayApplyOpType(ind) : ArrayApplyOpType(replaceVarInExpr(ind, varName, destination));
+    }
+    
+    ArrayOp(
+        replaceVarInExpr(expr.arr, varName, destination),
+        newArrayOpType
+    );
+}
+
+replaceVarInExpr(expr : Expr, varName : string, destination: Expr) -> Expr {
+    switch (expr) {
+        Var(name) : {
+            if (name == varName) {
+                destination;
+            } else {
+                expr;
+            }
+        }
+
+        ArithmExpr() : replaceVarInArithmExpr(expr, varName, destination);
+
+        ArrayOp(arr, opType) : replaceVarsInArrayOp(expr, varName, destination);
+    
+        Const() : expr;
+    }
+}
+
+generateVCFromAssigmnent(assignment : Assignment, preCond : BooleanExpr, postCond : BooleanExpr) -> Set<BooleanExpr> {        
+    makeSet1(
+        buildLogicImplication(
+            preCond,
+            replaceVarInBooleanExpr(
+                postCond,
+                assignment.varName,
+                assignment.expr
+            )
+        )
+    ); 
+}
+
+generateVCFromBodiesSeq(bodiesSeq : BodiesSeq, preCond : BooleanExpr, postCond : BooleanExpr) -> Set<BooleanExpr> {
+    bodies = bodiesSeq.bodies;
+
+    if (length(bodies) == 0) {
+        makeSet1(buildLogicImplication(preCond, postCond));
+    } else {
+        generateVCFromBodyConds(
+            bodies[0],
+            preCond,
+            generateVCFromBody(
+                BodiesSeq(tail(bodies)),
+                BoolConst(true),
+                postCond
+            )
+        );
+    }
+}
+
+generateVCFromTest(test : Test, preCond : BooleanExpr, postCond : BooleanExpr) -> Set<BooleanExpr> {
+    makeSet1(
+        buildLogicImplication(
+            preCond,
+            buildLogicImplication(
+                test.be, 
+                postCond
+            )
+        )
+    );
+}
+
+generateVCFromPrint(print : Print, preCond : BooleanExpr, postCond : BooleanExpr) -> Set<BooleanExpr> {    
+    makeSet1(
+        buildLogicImplication(
+            preCond, 
+            postCond
+        )
+    );
+}
+
+generateVCFromChoice(choice : UDChoice, preCond : BooleanExpr, postCond : BooleanExpr) -> Set<BooleanExpr> {        
+    fold(
+        choice.bodies,
+        makeSet(),
+        \acc, b -> mergeSets(
+            acc,
+            generateVCFromBody(
+                b,
+                preCond,
+                postCond
+            )
+        )
+    );
+}
+
+generateVCFromIteration(iteration : AnnotatedUDIteration, preCond : BooleanExpr, postCond : BooleanExpr) -> Set<BooleanExpr> {
+    inv = iteration.invariant;
+    
+    mergeSets(
+        makeSet1(
+            buildLogicImplication(
+                preCond,
+                inv
+                )
+        ),
+        generateVCFromBody( 
+            iteration.body,
+            inv, 
+            postCond
+        )
+    );
+}
+
+generateVCFromBodyConds(body : Body, preCond : BooleanExpr, postConds : Set<BooleanExpr>) -> Set<BooleanExpr> {
+    postCond = condsSetToCond(postConds);
+    
+    switch (body) {
+        Assignment(varName, expr) : generateVCFromAssigmnent(body, preCond, postCond);
+    
+        BodiesSeq(bodies) : generateVCFromBodiesSeq(body, preCond, postCond);
+
+        Test(cond) : generateVCFromTest(body, preCond, postCond);
+
+        Print(expr) : generateVCFromPrint(body, preCond, postCond);
+
+        UDChoice(bodies) : generateVCFromChoice(body, preCond, postCond);
+
+        AnnotatedUDIteration(iterationBody, invariant) : generateVCFromIteration(body, preCond, postCond);
+    }
+}
+
+generateVCFromBody(body : Body, preCond : BooleanExpr, postCond : BooleanExpr) -> Set<BooleanExpr> {
+    generateVCFromBodyConds(body, preCond, makeSet1(postCond));
+}
+
+generateVC(program : AnnotatedNemoProgram) -> BooleanExpr {
+    annotatedBody = program.body;
+    setOfVC = generateVCFromBody(annotatedBody.body, annotatedBody.preCond, annotatedBody.postCond);
+    condsSetToCond(setOfVC);
+}
+
+
+exprType2s(t : Type) -> string {
+    switch (t) {
+        Int() : "INT";
+        Bool() : "BOOL";
+        Array(baseType) : "[" + exprType2s(baseType) + "]";
+        NoType() : "<No type>";
+        AnyType() : "<Any type>";
+    }
+}
+
+varDecl2s(vd: VarDecl) -> string {
+    "VAR " + vd.var + " : " + exprType2s(vd.type) + ";";
+}
+
+varDeclList2s(vdl : VarDeclList) -> string {
+    fold(vdl.vars, "", \s, d -> {
+        s + varDecl2s(d) + "\n";
+    })
+}
+
+arithmExpr2s(ae : ArithmExpr) -> string {
+    withoutBrackets = switch (ae) {
+        ArithmBinary(l, r, op) : {
+            ls = expr2s(l);
+            rs = expr2s(r);
+            
+            switch (op) {
+                ArithmAddOp() : ls + " + " + rs;
+                ArithmSubOp() : ls + " - " + rs;
+                ArithmMulOp() : ls + " * " + rs;
+                ArithmDivOp() : ls + " / " + rs;
+            }
+        }
+        
+        ArithmNeg(e) : "-" + expr2s(e);
+    }
+
+    "(" + withoutBrackets + ")";
+}
+
+arrayOp2s(arrayOp : ArrayOp) -> string {
+    arr = arrayOp.arr;
+    arrRepr = expr2s(arr);
+
+    switch (arrayOp.opType) {
+        ArrayUpdateOpType(ind, val) : "UPD(" + arrRepr + ", " + expr2s(ind) + ", " + expr2s(val) + ")";
+
+        ArrayApplyOpType(ind) : "APP(" + arrRepr + ", " + expr2s(ind) + ")";
+    }
+}
+
+comparisonType2s(ct : ComparisonType) -> string {
+    switch (ct) {
+        Equal() : " = ";
+        Less() : " < ";
+    }
+}
+
+booleanExpr2s(be : BooleanExpr) -> string {
+    switch (be) {
+        Comparison(l, r, ct) : expr2s(l) + comparisonType2s(ct) + expr2s(r);
+        Not(e) : "!(" + booleanExpr2s(e) + ")";
+        Or(l, r) : "(" + booleanExpr2s(l) + ")" + " || " + "(" + booleanExpr2s(r) + ")";
+        BoolConst(v) : b2s(v);
+    }
+}
+
+expr2s(e : Expr) -> string {
+    switch (e) {
+        Var(name) : name;
+        Const() : const2s(e);
+        ArithmExpr() : arithmExpr2s(e);
+        ArrayOp(arr, opType) : arrayOp2s(e);
+    }
+}
+
+
+type2Z3type(t: Type){
+    switch (t : Type) {
+        Int(): "Int"
+        Array(t2): "(Array Int " + type2Z3type(t2) +" )"
+        AnyType(): "Int"
+        NoType(): "Int"
+        Bool(): "Int"
+    }
+}
+
+
+generateVarDeclZ3(varDecl: VarDeclList) -> string {
+    fold(varDecl.vars, "", \acc,var -> {
+        acc + "( declare-const " + var.var + " " +type2Z3type(var.type) + ")\n"
+    })
+}
+
+
+arithm2Z3(ex: ArithmExpr) -> string {
+    switch (ex : ArithmExpr) {
+        ArithmNeg(e): "(- " +  Expr2Z3(e) + ")"
+        ArithmBinary(l, r, op): switch (op : ArithmBinaryOp) {
+            ArithmAddOp(): "(+ " +  Expr2Z3(l) + " " + Expr2Z3(r) + ")" 
+            ArithmMulOp(): "(* " +  Expr2Z3(l) + " " + Expr2Z3(r) + ")"
+            ArithmDivOp(): "(/ " +  Expr2Z3(l) + " " + Expr2Z3(r) + ")"
+            ArithmSubOp(): "(- " +  Expr2Z3(l) + " " + Expr2Z3(r) + ")"
+        }
+    }
+}
+
+
+arrayOp2Z3(arrayOp: ArrayOp) -> string {
+    switch (arrayOp.opType : ArrayOpType) {
+        ArrayUpdateOpType(i, val): "(store " + Expr2Z3(arrayOp.arr) + " " + Expr2Z3(i) + " " + Expr2Z3(val) + ")"
+        ArrayApplyOpType(i): "(select " + Expr2Z3(arrayOp.arr) + " " + Expr2Z3(i) + ")"
+    }
+}
+
+
+Expr2Z3(expr: Expr) -> string {
+    switch (expr : Expr) {
+        Var(v): v
+        IntConst(v): i2s(v)
+        ArrayConst(arr): constArray2Z3(expr)
+        ArrayOp(arr, op): arrayOp2Z3(expr)
+        ArithmExpr(): arithm2Z3(expr)
+    }
+}
+
+
+boolExpr2Z3(boolExpr: BooleanExpr) -> string {
+    switch(boolExpr: BooleanExpr){
+        BoolConst(c): b2s(c);
+        Or(b1, b2): "(or " + boolExpr2Z3(b1) + " "  + boolExpr2Z3(b2) + ")"
+        Not(b): "(not " + boolExpr2Z3(b) +")"  
+        Comparison(l, r, op):  switch (op : ComparisonType) {
+            Equal(): "(= " +  Expr2Z3(l) + " " + Expr2Z3(r) + ")" 
+            Less():  "(< " +  Expr2Z3(l) + " "  + Expr2Z3(r) + ")"
+            }  
+        
+    }
+}
+
+
+generateZ3FromVC(varDecl: VarDeclList, boolExpr: BooleanExpr) -> string {
+    generateVarDeclZ3(varDecl) + "(assert (= " + boolExpr2Z3(boolExpr) + " false))\n(check-sat)\n(get-model)\n" 
+}
+
+
+main() {
+    parseRes:AnnotatedNemoProgram = parse("#include ./sandbox/test.nemo");
+    println(parseRes);
+    println(checkBody(parseRes.body.body, parseRes.varDeclList));
+    fori(0, length(parseRes.varDeclList.vars) - 1, \i -> {println(i); println(parseRes.varDeclList.vars[i])})
+    println(generateVC(parseRes));
+    println(booleanExpr2s(generateVC(parseRes)));
+    println("\n\n");
+    println(generateZ3FromVC(parseRes.varDeclList, generateVC(parseRes)));
+
+    quit(0)
+}
