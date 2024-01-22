@@ -941,10 +941,7 @@ main() {
     parseRes:AnnotatedNemoProgram = parse("#include ./sandbox/test.nemo");
     println(parseRes);
     println(checkBody(parseRes.body.body, parseRes.varDeclList));
-    fori(0, length(parseRes.varDeclList.vars) - 1, \i -> {println(i); println(parseRes.varDeclList.vars[i])})
-    println(generateVC(parseRes));
-    println(booleanExpr2s(generateVC(parseRes)));
-    println("\n\n");
+    println("\n \n \n");
     println(generateZ3FromVC(parseRes.varDeclList, generateVC(parseRes)));
 
     quit(0)

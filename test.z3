@@ -2,6 +2,6 @@
 ( declare-const b Int)
 ( declare-const x Int)
 ( declare-const i Int)
-(assert (= (or (not (or (= a 0) (< 0 a))) (or (not true) (not (or (not (or (not true) (or (= 0 a) (< 0 a)))) (not (or (not (or (= 0 a) (< 0 a))) (or (not true) (or (not true) (or (not (or (= (+ 0 1) a) (< (+ 0 1) a))) (or (not true) (or (not true) (or (not (= (+ 0 1) a)) (or (not true) (= (+ 0 b) (* a b))))))))))))))) false))
+(assert (= (or (not (or (= a 0) (< 0 a))) (not (or (not (or (not true) (or (= 0 a) (< 0 a)))) (not (or (not (or (= 0 a) (< 0 a))) (or (not true) (or (not true) (or (not (or (= (+ 0 1) a) (< (+ 0 1) a))) (or (not true) (or (not true) (or (not (= (+ 0 1) a)) (or (not true) (= (+ x b) (* a b)))))))))))))) false))
 (check-sat)
 (get-model)
